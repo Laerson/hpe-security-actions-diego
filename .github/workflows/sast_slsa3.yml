@@ -1,0 +1,74 @@
+name: SLSA3 SAST
+
+permissions: {}
+
+on:
+  workflow_call:
+
+    inputs:
+      rules:
+        description: Semgrep rules
+        required: false
+        default: p/default
+        type: string
+    
+      suppression-rules:
+        description: |
+          Suppression rule options to apply to the results.
+          options are:
+          || true
+          --no-suppress-errors
+          or none
+          See https://semgrep.dev/docs/writing-rules/suppressing-results/ for more information.
+        required: false
+        type: string
+
+      # NOTE: the additional inputs below are to support additional
+      # functionality of the workflow.
+      rekor-log-public:
+        description: "Allow publication of your repository name on the public Rekor log"
+        required: false
+        type: boolean
+        default: false
+
+    outputs:
+      artifact:
+        description: "Name of the artifact built"
+        value: "${{ fromJSON(jobs.slsa-run.outputs.build-artifacts-outputs).artifact }}"
+
+      provenance-download-name:
+        description: "The name of the provenance attestation uploaded to the workflow run."
+        value: ${{ jobs.slsa-run.outputs.attestations-download-name }}
+
+      provenance-download-sha256:
+        description: "The sha256 of the provenance attestation uploaded to the workflow run."
+        value: ${{ jobs.slsa-run.outputs.attestations-download-sha256 }}
+
+
+jobs:
+  slsa-setup:
+    permissions:
+      id-token: write
+    outputs:
+      slsa-token: ${{ steps.generate.outputs.slsa-token }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate the token
+        id: generate
+        uses: slsa-framework/slsa-github-generator/actions/delegator/setup-generic@v1.9.0
+        with:
+          slsa-workflow-recipient: "delegator_lowperms-generic_slsa3.yml"
+          slsa-rekor-log-public: ${{ inputs.rekor-log-public }}
+          slsa-runner-label: "ubuntu-latest"
+          slsa-build-action-path: "./internal/sast_callback_action"
+          slsa-workflow-inputs: ${{ toJson(inputs) }}
+
+  slsa-run:
+    needs: [slsa-setup]
+    permissions:
+      id-token: write # For signing.
+      contents: read # For code access.
+      actions: read # For the entrypoint.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/delegator_lowperms-generic_slsa3.yml@v1.9.0
+    with:
+      slsa-token: ${{ needs.slsa-setup.outputs.slsa-token }}
